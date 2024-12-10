@@ -68,17 +68,54 @@ public class GolosActivity extends AppCompatActivity {
     private void fetchVotings() {
         APIClient.get("/getVotings", response -> {
             try {
-                JSONArray votings = new JSONArray(response);
                 votingListContainer.removeAllViews();
+                if (response.trim().startsWith("[")) {
+                    JSONArray votings = new JSONArray(response);
 
-                List<JSONObject> votingList = new ArrayList<>();
-                for (int i = 0; i < votings.length(); i++) {
-                    votingList.add(votings.getJSONObject(i));
-                }
-                votingList.sort((v1, v2) -> v1.optString("title").compareTo(v2.optString("title")));
+                    List<JSONObject> activeVotings = new ArrayList<>();
+                    List<JSONObject> expiredVotings = new ArrayList<>();
 
-                for (JSONObject voting : votingList) {
-                    displayVoting(voting);
+                    long currentTime = System.currentTimeMillis();
+
+                    for (int i = 0; i < votings.length(); i++) {
+                        JSONObject voting = votings.getJSONObject(i);
+                        long endDateMillis = voting.optLong("end_date");
+                        if (endDateMillis > currentTime) {
+                            activeVotings.add(voting);
+                        } else {
+                            expiredVotings.add(voting);
+                        }
+                    }
+
+                    activeVotings.sort((v1, v2) -> v1.optString("title").compareTo(v2.optString("title")));
+                    expiredVotings.sort((v1, v2) -> v1.optString("title").compareTo(v2.optString("title")));
+
+                    if (!activeVotings.isEmpty()) {
+                        addSectionHeader("Актуальные голосования");
+                        for (JSONObject voting : activeVotings) {
+                            displayVoting(voting);
+                        }
+                    }
+
+                    if (!expiredVotings.isEmpty()) {
+                        addSectionHeader("Неактуальные голосования");
+                        for (JSONObject voting : expiredVotings) {
+                            displayVoting(voting);
+                        }
+                    }
+
+                } else {
+                    // Ответ — объект с сообщением
+                    JSONObject responseObject = new JSONObject(response);
+                    if (responseObject.has("message")) {
+                        String message = responseObject.getString("message");
+                        TextView noVotingsMessage = new TextView(this);
+                        noVotingsMessage.setText(message);
+                        noVotingsMessage.setTextSize(18);
+                        noVotingsMessage.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                        noVotingsMessage.setPadding(16, 16, 16, 16);
+                        votingListContainer.addView(noVotingsMessage);
+                    }
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -87,6 +124,15 @@ public class GolosActivity extends AppCompatActivity {
         }, error -> {
             Toast.makeText(GolosActivity.this, "Ошибка при загрузке голосований", Toast.LENGTH_SHORT).show();
         });
+    }
+
+    private void addSectionHeader(String headerText) {
+        TextView header = new TextView(this);
+        header.setText(headerText);
+        header.setTextSize(24);
+        header.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        header.setPadding(16, 16, 16, 16);
+        votingListContainer.addView(header);
     }
 
     private void displayVoting(JSONObject voting) {
@@ -98,20 +144,19 @@ public class GolosActivity extends AppCompatActivity {
 
             CardView cardView = new CardView(this);
             CardView.LayoutParams cardParams = new CardView.LayoutParams(
-                    CardView.LayoutParams.MATCH_PARENT, CardView.LayoutParams.WRAP_CONTENT);
-            cardParams.setMargins(8, 8, 8, 8);
+                    CardView.LayoutParams.MATCH_PARENT,
+                    CardView.LayoutParams.WRAP_CONTENT
+            );
+            cardParams.setMargins(16, 16, 16, 16);
             cardView.setLayoutParams(cardParams);
             cardView.setContentPadding(16, 16, 16, 16);
             cardView.setRadius(8);
             cardView.setCardBackgroundColor(getResources().getColor(R.color.cardview_light_background));
 
-            FrameLayout frameLayout = new FrameLayout(this);
-            cardView.addView(frameLayout);
-
             LinearLayout votingLayout = new LinearLayout(this);
             votingLayout.setOrientation(LinearLayout.VERTICAL);
             votingLayout.setPadding(16, 16, 16, 16);
-            frameLayout.addView(votingLayout);
+            cardView.addView(votingLayout);
 
             TextView votingTitle = new TextView(this);
             votingTitle.setText(title);
@@ -123,6 +168,9 @@ public class GolosActivity extends AppCompatActivity {
             votingDescription.setText(description);
             votingLayout.addView(votingDescription);
 
+            long endDateMillis = voting.optLong("end_date");
+            boolean isExpired = endDateMillis <= System.currentTimeMillis();
+
             for (int i = 0; i < answerOptions.length(); i++) {
                 String option = answerOptions.optString(i);
                 int count = voteCounts != null ? voteCounts.optInt(option, 0) : 0;
@@ -132,7 +180,13 @@ public class GolosActivity extends AppCompatActivity {
 
                 Button answerButton = new Button(this);
                 answerButton.setText(option);
-                answerButton.setOnClickListener(view -> voteForOption(voting.optInt("id"), option));
+                answerButton.setOnClickListener(view -> {
+                    if (isExpired) {
+                        Toast.makeText(this, "Голосование уже неактуально", Toast.LENGTH_SHORT).show();
+                    } else {
+                        voteForOption(voting.optInt("id"), option);
+                    }
+                });
 
                 TextView voteCountText = new TextView(this);
                 voteCountText.setText(" (" + count + " голосов)");
@@ -144,7 +198,6 @@ public class GolosActivity extends AppCompatActivity {
                 votingLayout.addView(optionLayout);
             }
 
-            long endDateMillis = voting.optLong("end_date");
             Date endDate = new Date(endDateMillis);
             SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yyyy, HH:mm");
             String formattedDate = dateFormat.format(endDate);
@@ -154,26 +207,25 @@ public class GolosActivity extends AppCompatActivity {
             votingLayout.addView(endDateText);
 
             Button deleteButton = new Button(this);
-            deleteButton.setText("✖");
-            deleteButton.setTextSize(20);
-            deleteButton.setBackgroundColor(getResources().getColor(R.color.transparent));
-            deleteButton.setTextColor(getResources().getColor(R.color.colorAccent));
+            deleteButton.setText("Удалить голосование");
+            deleteButton.setBackgroundColor(getResources().getColor(android.R.color.holo_red_light));
+            deleteButton.setTextColor(getResources().getColor(android.R.color.white));
             deleteButton.setOnClickListener(view -> deleteVoting(voting.optInt("id")));
 
-            FrameLayout.LayoutParams deleteParams = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
+            LinearLayout.LayoutParams deleteButtonParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
             );
-            deleteParams.gravity = Gravity.START | Gravity.TOP;
-            deleteParams.setMargins(8, 8, 0, 0);
-            deleteButton.setLayoutParams(deleteParams);
-            frameLayout.addView(deleteButton);
+            deleteButtonParams.setMargins(0, 16, 0, 0);
+            deleteButton.setLayoutParams(deleteButtonParams);
+            votingLayout.addView(deleteButton);
 
             votingListContainer.addView(cardView);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
+
 
     private void deleteVoting(int votingId) {
         APIClient.delete("/deleteVoting/" + votingId, response -> {
@@ -223,12 +275,14 @@ public class GolosActivity extends AppCompatActivity {
 
         DatePickerDialog datePickerDialog = new DatePickerDialog(this,
                 (view, year1, monthOfYear, dayOfMonth) -> {
-                    calendar.set(year1, monthOfYear, dayOfMonth);
+                    calendar.set(year1, monthOfYear, dayOfMonth, 23, 59);
                     endDate = calendar.getTime();
-                    endDateText.setText("Дата окончания: " + endDate.toString());
+                    SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yyyy, HH:mm");
+                    endDateText.setText("Дата окончания: " + dateFormat.format(endDate));
                 }, year, month, day);
         datePickerDialog.show();
     }
+
 
     private void createVoting() {
         String title = titleInput.getText().toString();
@@ -242,30 +296,57 @@ public class GolosActivity extends AppCompatActivity {
                 answerOptions.add(answerText);
             }
         }
+
         if (title.isEmpty() || description.isEmpty() || answerOptions.isEmpty() || endDate == null) {
             Toast.makeText(this, "Заполните все поля", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        try {
-            JSONObject voteData = new JSONObject();
-            voteData.put("title", title);
-            voteData.put("description", description);
-            voteData.put("answer_option", new JSONArray(answerOptions));
-            voteData.put("end_date", endDate.getTime());
+        APIClient.get("/getVotings", response -> {
+            try {
+                if (response.trim().startsWith("[")) {
+                    JSONArray votings = new JSONArray(response);
+                    long currentTime = System.currentTimeMillis();
+                    for (int i = 0; i < votings.length(); i++) {
+                        JSONObject voting = votings.getJSONObject(i);
+                        String existingTitle = voting.optString("title");
+                        long endDateMillis = voting.optLong("end_date");
+                        if (existingTitle.equalsIgnoreCase(title) && endDateMillis > currentTime) {
+                            Toast.makeText(GolosActivity.this, "Голосование с таким названием уже существует", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                    }
+                } else {
+                    JSONObject responseObject = new JSONObject(response);
+                    if (responseObject.has("message")) {
+                        String message = responseObject.getString("message");
+                        System.out.println("Сообщение сервера: " + message);
+                    }
+                }
 
-            APIClient.post("/createVoting", voteData, response -> {
-                Toast.makeText(this, "Голосование создано", Toast.LENGTH_SHORT).show();
-                clearInputs();
-            }, error -> {
-                Toast.makeText(this, "Ошибка при создании голосования", Toast.LENGTH_SHORT).show();
-            });
+                JSONObject voteData = new JSONObject();
+                voteData.put("title", title);
+                voteData.put("description", description);
+                voteData.put("answer_option", new JSONArray(answerOptions));
+                voteData.put("end_date", endDate.getTime());
 
-        } catch (Exception e) {
-            e.printStackTrace();
-            Toast.makeText(this, "Ошибка при создании голосования", Toast.LENGTH_SHORT).show();
-        }
+                APIClient.post("/createVoting", voteData, postResponse -> {
+                    Toast.makeText(this, "Голосование создано", Toast.LENGTH_SHORT).show();
+                    clearInputs();
+                }, error -> {
+                    Toast.makeText(this, "Ошибка при создании голосования", Toast.LENGTH_SHORT).show();
+                });
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                Toast.makeText(this, "Ошибка при обработке данных", Toast.LENGTH_SHORT).show();
+            }
+        }, error -> {
+            Toast.makeText(this, "Ошибка при загрузке голосований", Toast.LENGTH_SHORT).show();
+        });
     }
+
+
     private void clearInputs() {
         titleInput.setText("");
         descriptionInput.setText("");

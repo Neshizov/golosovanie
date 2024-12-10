@@ -40,8 +40,24 @@ public class RegisterActivity extends AppCompatActivity {
     private void register() {
         String email = emailInput.getText().toString().trim();
         String password = passwordInput.getText().toString().trim();
+
         if (email.isEmpty() || password.isEmpty()) {
             Toast.makeText(this, "Заполните все поля", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (!email.contains("@") || email.indexOf('@') <= 5) {
+            Toast.makeText(this, "Часть до @ в email должна быть больше 5 символов", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (password.length() < 5) {
+            Toast.makeText(this, "Пароль должен быть не меньше 5 символов", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (password.matches("\\d+")) {
+            Toast.makeText(this, "Пароль не должен состоять только из цифр", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
@@ -54,8 +70,6 @@ public class RegisterActivity extends AppCompatActivity {
                     String message = response.optString("message", "Неизвестная ошибка");
                     String token = response.optString("token");
 
-                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-
                     if (message.equals("Пользователь успешно зарегистрирован") && !token.isEmpty()) {
                         DatabaseHelper dbHelper = new DatabaseHelper(this);
                         boolean isSaved = dbHelper.addUser(email, token);
@@ -67,13 +81,28 @@ public class RegisterActivity extends AppCompatActivity {
                         }
                         startActivity(new Intent(this, LoginActivity.class));
                         finish();
+                    } else {
+                        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
                     Toast.makeText(this, "Ошибка при обработке ответа", Toast.LENGTH_SHORT).show();
                 }
             }, error -> {
-                Toast.makeText(this, "Ошибка регистрации", Toast.LENGTH_SHORT).show();
+                try {
+                    String errorMessage = error.networkResponse != null
+                            ? new JSONObject(new String(error.networkResponse.data)).optString("message", "Ошибка сети")
+                            : "Ошибка сети";
+
+                    if (errorMessage.equals("Пользователь с таким email уже существует")) {
+                        Toast.makeText(this, errorMessage, Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "Ошибка регистрации: " + errorMessage, Toast.LENGTH_SHORT).show();
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Toast.makeText(this, "Ошибка регистрации", Toast.LENGTH_SHORT).show();
+                }
             });
 
         } catch (Exception e) {
